@@ -22,50 +22,47 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -76,14 +73,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -134,7 +132,6 @@ fun AppScreen() {
         ActivityResultContracts.RequestPermission()
     ) { granted -> notificationsGranted = granted }
 
-    // Re-read permission state when returning from system settings screens.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -150,7 +147,6 @@ fun AppScreen() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Live hinge angle readout for tuning the thresholds.
     val hingeSensor = remember { context.sensorManager()?.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE) }
     var hingeAngle by remember { mutableStateOf<Float?>(null) }
     DisposableEffect(hingeSensor) {
@@ -198,263 +194,166 @@ fun AppScreen() {
     }
 
     fun testAction() {
-        val intent = ActionLauncher.buildIntent(context, settings) ?: return
-        runCatching { context.startActivity(intent) }
+        ActionLauncher.buildIntent(context, settings)?.let { runCatching { context.startActivity(it) } }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("TT", fontWeight = FontWeight.Bold) })
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ttColors().background)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // Viewing area — title and summary, no interactive elements.
+        Column(Modifier.statusBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp)) {
+            Text("TT", fontSize = 40.sp, fontWeight = FontWeight.Light, color = ttColors().onBackground)
+            Text("Fold-gesture launcher", fontSize = 16.sp, color = ttColors().subText)
         }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+
+        // Master switch
+        TtRow(
+            title = "Enabled",
+            description = when {
+                !settings.enabled -> "Off"
+                !settings.isActionReady -> "On — pick an app or shortcut to arm"
+                else -> "On — ${ActionLauncher.describe(settings)}"
+            },
+            trailing = { TtSwitch(checked = settings.enabled, onCheckedChange = { setEnabled(it) }) }
+        )
+        TtDivider()
+
+        if (settings.enabled && !overlayGranted) {
+            TtRow(
+                title = "Permission required",
+                description = "Grant \u201cDisplay over other apps\u201d so TT can launch from the background.",
+                leading = {
+                    Icon(
+                        Icons.Rounded.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                },
+                trailing = { TtTextButton("Grant", onClick = { grantOverlay() }) },
+            )
+            TtDivider()
+        }
+
+        SectionHeader("Setup")
+        SetupRow(
+            ok = overlayGranted,
+            pendingIcon = Icons.Rounded.Warning,
+            title = "Display over other apps",
+            description = "Required so TT can open your app from the background",
+            actionLabel = if (overlayGranted) null else "Grant",
+            onAction = { grantOverlay() },
+        )
+        SetupRow(
+            ok = notificationsGranted,
+            pendingIcon = Icons.Rounded.Notifications,
+            title = "Notifications",
+            description = "Shows a quiet notification while TT is listening",
+            actionLabel = if (notificationsGranted) null else "Allow",
+            onAction = {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            },
+        )
+        SetupRow(
+            ok = batteryExempt,
+            pendingIcon = Icons.Rounded.Info,
+            title = "Battery optimization",
+            description = "Exempt TT so Android doesn't kill the listener",
+            actionLabel = if (batteryExempt) null else "Exempt",
+            onAction = { requestBatteryExemption() },
+        )
+        SetupRow(
+            ok = hingeSensor != null,
+            pendingIcon = Icons.Rounded.Info,
+            title = "Hinge angle sensor",
+            description = if (hingeSensor != null) "Available — this device is supported"
+            else "Not found on this device",
+            actionLabel = null,
+            onAction = null,
+        )
+        TtDivider()
+
+        SectionHeader("When triggered")
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                "Bend your foldable past the fold angle, then reopen it quickly — TT launches the app or link you pick below. Works on any device with a hinge angle sensor (Galaxy Z Fold, Pixel Fold, …).",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ToggleOption(
+                text = "App",
+                selected = settings.actionType == ActionType.APP,
+                modifier = Modifier.weight(1f),
+                onClick = { scope.launch { repo.setActionType(ActionType.APP) } }
+            )
+            ToggleOption(
+                text = "Shortcut",
+                selected = settings.actionType == ActionType.SHORTCUT,
+                modifier = Modifier.weight(1f),
+                onClick = { scope.launch { repo.setActionType(ActionType.SHORTCUT) } }
+            )
+        }
+        when (settings.actionType) {
+            ActionType.APP -> TtRow(
+                title = if (settings.packageName.isBlank()) "Choose an app…"
+                else settings.appLabel.ifBlank { settings.packageName },
+                description = settings.packageName.takeIf { it.isNotBlank() },
+                onClick = { pickerOpen = true },
             )
 
-            Card {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Enabled", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            when {
-                                !settings.enabled -> "Off"
-                                !settings.isActionReady -> "On — pick an app or link to arm"
-                                else -> "On — ${ActionLauncher.describe(settings)}"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = settings.enabled,
-                        onCheckedChange = { setEnabled(it) }
-                    )
-                }
-            }
-
-            if (settings.enabled && !overlayGranted) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Rounded.Warning,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        Spacer(Modifier.size(12.dp))
-                        Text(
-                            "TT can't launch apps from the background yet — grant \u201cDisplay over other apps\u201d.",
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        TextButton(onClick = { grantOverlay() }) { Text("Grant") }
-                    }
-                }
-            }
-
-            Card {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Setup", style = MaterialTheme.typography.titleMedium)
-                    SetupRow(
-                        ok = overlayGranted,
-                        okIcon = Icons.Rounded.Check,
-                        pendingIcon = Icons.Rounded.Warning,
-                        title = "Display over other apps",
-                        description = "Required so TT can open your app from the background",
-                        actionLabel = "Grant",
-                        onAction = { grantOverlay() },
-                    )
-                    SetupRow(
-                        ok = notificationsGranted,
-                        okIcon = Icons.Rounded.Check,
-                        pendingIcon = Icons.Rounded.Notifications,
-                        title = "Notifications",
-                        description = "Shows a quiet notification while TT is listening",
-                        actionLabel = "Allow",
-                        onAction = {
-                            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        },
-                    )
-                    SetupRow(
-                        ok = batteryExempt,
-                        okIcon = Icons.Rounded.Check,
-                        pendingIcon = Icons.Rounded.Info,
-                        title = "Battery optimization",
-                        description = "Exempt TT so Android doesn't kill the listener",
-                        actionLabel = "Exempt",
-                        onAction = { requestBatteryExemption() },
-                    )
-                    SetupRow(
-                        ok = hingeSensor != null,
-                        okIcon = Icons.Rounded.Check,
-                        pendingIcon = Icons.Rounded.Info,
-                        title = "Hinge angle sensor",
-                        description = if (hingeSensor != null) {
-                            "Available — this device is supported"
-                        } else {
-                            "Not found on this device"
-                        },
-                        actionLabel = null,
-                        onAction = null,
-                    )
-                }
-            }
-
-            Card {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("When triggered", style = MaterialTheme.typography.titleMedium)
-
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        SegmentedButton(
-                            selected = settings.actionType == ActionType.APP,
-                            onClick = { scope.launch { repo.setActionType(ActionType.APP) } },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                        ) { Text("App") }
-                        SegmentedButton(
-                            selected = settings.actionType == ActionType.SHORTCUT,
-                            onClick = { scope.launch { repo.setActionType(ActionType.SHORTCUT) } },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                        ) { Text("Shortcut") }
-                    }
-
-                    when (settings.actionType) {
-                        ActionType.APP -> {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { pickerOpen = true }
-                                    .padding(vertical = 8.dp)
-                            ) {
-                                Text(
-                                    if (settings.packageName.isBlank()) "Choose an app…"
-                                    else settings.appLabel.ifBlank { settings.packageName },
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
-                                if (settings.packageName.isNotBlank()) {
-                                    Text(
-                                        settings.packageName,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-
-                        ActionType.SHORTCUT -> {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { pickerOpen = true }
-                                    .padding(vertical = 8.dp)
-                            ) {
-                                Text(
-                                    if (settings.shortcutId.isBlank()) "Choose a shortcut…"
-                                    else settings.shortcutLabel.ifBlank { settings.shortcutId },
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
-                                if (settings.shortcutId.isNotBlank()) {
-                                    Text(
-                                        settings.shortcutPackage,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider()
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        FilledTonalButton(
-                            enabled = settings.isActionReady,
-                            onClick = { testAction() }
-                        ) {
-                            Icon(Icons.Rounded.PlayArrow, contentDescription = null)
-                            Spacer(Modifier.size(8.dp))
-                            Text("Test now")
-                        }
-                        Spacer(Modifier.size(12.dp))
-                        Text(
-                            "Runs the configured action immediately.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            Card {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Hinge", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        hingeAngle?.let { angle ->
-                            val phase = when {
-                                angle >= GestureConfig.STANDARD.openAngle -> "Open"
-                                angle <= GestureConfig.STANDARD.foldAngle -> "Bent"
-                                else -> "Partial"
-                            }
-                            Text(
-                                phase,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                    if (hingeSensor == null) {
-                        Text(
-                            "No hinge angle sensor found. TT needs a foldable such as Galaxy Z Fold or Pixel Fold.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    } else {
-                        Text(
-                            hingeAngle?.let { "${it.roundToInt()}\u00b0" } ?: "…",
-                            style = MaterialTheme.typography.displaySmall,
-                        )
-                        Text(
-                            "Live reading. Gesture: open (180\u00b0) \u2192 bend past 90\u00b0 \u2192 reopen within 2s.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
+            ActionType.SHORTCUT -> TtRow(
+                title = if (settings.shortcutId.isBlank()) "Choose a shortcut…"
+                else settings.shortcutLabel.ifBlank { settings.shortcutId },
+                description = settings.shortcutPackage.takeIf { it.isNotBlank() },
+                onClick = { pickerOpen = true },
+            )
         }
+        TtDivider()
+
+        SectionHeader("Hinge")
+        if (hingeSensor == null) {
+            TtRow(
+                title = "Not available",
+                description = "No hinge angle sensor found. TT needs a foldable such as Galaxy Z Fold or Pixel Fold.",
+            )
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    hingeAngle?.let { "${it.roundToInt()}\u00b0" } ?: "…",
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.Light,
+                    color = ttColors().onBackground,
+                    modifier = Modifier.weight(1f)
+                )
+                hingeAngle?.let { angle ->
+                    val phase = when {
+                        angle >= GestureConfig.STANDARD.openAngle -> "Open"
+                        angle <= GestureConfig.STANDARD.foldAngle -> "Bent"
+                        else -> "Partial"
+                    }
+                    Text(phase, fontSize = 17.sp, color = ttColors().accent)
+                }
+            }
+            Text(
+                "Gesture: open (180\u00b0) \u2192 bend past 90\u00b0 \u2192 reopen within 2s.",
+                fontSize = 13.sp,
+                color = ttColors().subText,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+        }
+
+        // Interaction area — the primary action lives at the bottom.
+        Box(Modifier.padding(horizontal = 24.dp, vertical = 24.dp)) {
+            TtButton(
+                text = "Test now",
+                enabled = settings.isActionReady,
+                onClick = { testAction() }
+            )
+        }
+        Spacer(Modifier.navigationBarsPadding().height(8.dp))
     }
 
     if (pickerOpen) {
@@ -485,40 +384,249 @@ fun AppScreen() {
     }
 }
 
+// --- sections ---------------------------------------------------------------
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Medium,
+        color = ttColors().accent,
+        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 6.dp)
+    )
+}
+
+@Composable
+private fun TtDivider() {
+    HorizontalDivider(color = ttColors().divider)
+}
+
+@Composable
+private fun TtRow(
+    title: String,
+    description: String? = null,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    titleColor: Color = Color.Unspecified,
+    onClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        leading?.invoke()
+        if (leading != null) Spacer(Modifier.size(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                fontSize = 18.sp,
+                color = if (titleColor == Color.Unspecified) ttColors().onBackground else titleColor
+            )
+            if (description != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(description, fontSize = 13.sp, color = ttColors().subText)
+            }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.size(12.dp))
+            trailing()
+        }
+    }
+}
+
 @Composable
 private fun SetupRow(
     ok: Boolean,
-    okIcon: ImageVector,
     pendingIcon: ImageVector,
     title: String,
     description: String,
     actionLabel: String?,
     onAction: (() -> Unit)?,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            if (ok) okIcon else pendingIcon,
-            contentDescription = null,
-            tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.size(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+    TtRow(
+        title = title,
+        description = description,
+        leading = {
+            Icon(
+                if (ok) Icons.Rounded.Check else pendingIcon,
+                contentDescription = null,
+                tint = if (ok) ttColors().activated else ttColors().subText
             )
+        },
+        trailing = {
+            if (!ok && actionLabel != null && onAction != null) {
+                TtTextButton(actionLabel, onClick = onAction)
+            }
         }
-        if (!ok && actionLabel != null && onAction != null) {
-            TextButton(onClick = onAction) { Text(actionLabel) }
+    )
+}
+
+@Composable
+private fun TtSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = Color.White,
+            checkedTrackColor = ttColors().activated,
+            uncheckedThumbColor = ttColors().subText,
+            uncheckedTrackColor = ttColors().grayButton,
+            uncheckedBorderColor = Color.Transparent,
+        )
+    )
+}
+
+@Composable
+private fun ToggleOption(
+    text: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (selected) ttColors().accent else ttColors().grayButton)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            fontSize = 17.sp,
+            color = if (selected) ttColors().onAccent else ttColors().onBackground
+        )
+    }
+}
+
+@Composable
+private fun TtButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (enabled) ttColors().accent else ttColors().grayButton)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            fontSize = 17.sp,
+            color = if (enabled) ttColors().onAccent else ttColors().subText
+        )
+    }
+}
+
+@Composable
+private fun TtTextButton(text: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick) { Text(text, fontSize = 17.sp) }
+}
+
+// --- pickers (bottom sheets) --------------------------------------------------
+
+private data class AppEntry(
+    val label: String,
+    val packageName: String,
+    val icon: androidx.compose.ui.graphics.ImageBitmap,
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppPickerDialog(
+    onDismiss: () -> Unit,
+    onPick: (AppEntry) -> Unit,
+) {
+    val context = LocalContext.current
+    var query by remember { mutableStateOf("") }
+    var apps by remember { mutableStateOf<List<AppEntry>?>(null) }
+
+    LaunchedEffect(Unit) {
+        apps = withContext(Dispatchers.IO) { loadLaunchableApps(context) }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+        containerColor = ttColors().background,
+        dragHandle = null,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Choose an app", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            TtSearchField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth()
+                )
+            when (val list = apps) {
+                null -> Box(
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
+
+                else -> {
+                    val filtered = list.filter {
+                        it.label.contains(query, ignoreCase = true) ||
+                            it.packageName.contains(query, ignoreCase = true)
+                    }
+                    if (filtered.isEmpty()) {
+                        Text(
+                            "No apps found",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 24.dp),
+                        )
+                    }
+                    LazyColumn(modifier = Modifier.height(400.dp)) {
+                        items(filtered, key = { it.packageName }) { entry ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPick(entry) }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Image(
+                                    entry.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp)
+                                )
+                                Spacer(Modifier.size(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        entry.label,
+                                        fontSize = 18.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        entry.packageName,
+                                        fontSize = 13.sp,
+                                        color = ttColors().subText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.navigationBarsPadding())
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ShortcutPickerDialog(
     app: AppEntry,
@@ -534,176 +642,94 @@ private fun ShortcutPickerDialog(
         }
     }
 
-    Dialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+        containerColor = ttColors().background,
+        dragHandle = null,
     ) {
-        Surface(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            shape = MaterialTheme.shapes.extraLarge,
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text("Shortcuts · ${app.label}", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "Only shortcuts the app declares statically (manifest shortcuts) are visible to other apps.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                when (val list = shortcuts) {
-                    null -> Box(
-                        modifier = Modifier.fillMaxWidth().height(120.dp),
-                        contentAlignment = Alignment.Center
-                    ) { CircularProgressIndicator() }
+            Text("Shortcuts", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text(
+                app.label,
+                fontSize = 13.sp,
+                color = ttColors().subText
+            )
+            when (val list = shortcuts) {
+                null -> Box(
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
 
-                    else -> if (list.isEmpty()) {
-                        Text(
-                            "This app publishes no shortcuts.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = 24.dp),
-                        )
-                    } else {
-                        LazyColumn(modifier = Modifier.height(360.dp)) {
-                            items(list, key = { it.id }) { sc ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { onPick(sc) }
-                                        .padding(vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    val icon = remember(sc.id) { sc.icon?.toIconBitmap(48) }
-                                    if (icon != null) {
-                                        Image(icon, contentDescription = null, modifier = Modifier.size(36.dp))
-                                        Spacer(Modifier.size(12.dp))
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text(sc.label, style = MaterialTheme.typography.bodyLarge)
-                                        Text(
-                                            sc.id,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+                else -> if (list.isEmpty()) {
+                    Text(
+                        "This app publishes no shortcuts.",
+                        fontSize = 18.sp,
+                        modifier = Modifier.padding(vertical = 24.dp),
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.height(360.dp)) {
+                        items(list, key = { it.id }) { sc ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPick(sc) }
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val icon = remember(sc.id) { sc.icon?.toIconBitmap(48) }
+                                if (icon != null) {
+                                    Image(icon, contentDescription = null, modifier = Modifier.size(36.dp))
+                                    Spacer(Modifier.size(12.dp))
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(sc.label, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        sc.id,
+                                        fontSize = 13.sp,
+                                        color = ttColors().subText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }
                     }
                 }
             }
+            Spacer(Modifier.navigationBarsPadding())
         }
     }
 }
 
-private data class AppEntry(
-    val label: String,
-    val packageName: String,
-    val icon: androidx.compose.ui.graphics.ImageBitmap,
-)
-
 @Composable
-private fun AppPickerDialog(
-    onDismiss: () -> Unit,
-    onPick: (AppEntry) -> Unit,
+private fun TtSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    var query by remember { mutableStateOf("") }
-    var apps by remember { mutableStateOf<List<AppEntry>?>(null) }
-
-    LaunchedEffect(Unit) {
-        apps = withContext(Dispatchers.IO) { loadLaunchableApps(context) }
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            shape = MaterialTheme.shapes.extraLarge,
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text("Choose an app", style = MaterialTheme.typography.titleLarge)
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Search") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            Icon(
-                                Icons.Rounded.Close,
-                                contentDescription = null,
-                                modifier = Modifier.clickable { query = "" }
-                            )
-                        }
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                when (val list = apps) {
-                    null -> Box(
-                        modifier = Modifier.fillMaxWidth().height(160.dp),
-                        contentAlignment = Alignment.Center
-                    ) { CircularProgressIndicator() }
-
-                    else -> {
-                        val filtered = list.filter {
-                            it.label.contains(query, ignoreCase = true) ||
-                                it.packageName.contains(query, ignoreCase = true)
-                        }
-                        if (filtered.isEmpty()) {
-                            Text(
-                                "No apps found",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(vertical = 24.dp),
-                            )
-                        }
-                        LazyColumn(modifier = Modifier.height(400.dp)) {
-                            items(filtered, key = { it.packageName }) { entry ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { onPick(entry) }
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Image(entry.icon, contentDescription = null, modifier = Modifier.size(40.dp))
-                                    Spacer(Modifier.size(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            entry.label,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Text(
-                                            entry.packageName,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        shape = RoundedCornerShape(12.dp),
+        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+        placeholder = { Text("Search", fontSize = 17.sp) },
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = ttColors().grayButton,
+            unfocusedContainerColor = ttColors().grayButton,
+            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+        ),
+        modifier = modifier.fillMaxWidth()
+    )
 }
 
 private fun loadLaunchableApps(context: Context): List<AppEntry> {
