@@ -1,3 +1,5 @@
+<img width="1024" height="559" alt="image_0aa59665-13b1-42a1-bf0f-8dd939eda730" src="https://github.com/user-attachments/assets/5b7597d0-564d-45c2-99f3-bcf85e81c067" />
+
 # TT
 
 Launch an app or shortcut with a flick of your foldable.
