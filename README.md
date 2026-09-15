@@ -11,6 +11,7 @@ Open your Galaxy Fold / Pixel Fold fully, bend it past 90°, and reopen within
 - Action: launch an app, or one of its shortcuts (YouTube Shorts, Camera Selfie, …)
 - Instant-save settings; the listener survives reboot and app updates
 - Live hinge-angle readout for sanity checking
+- Languages: English (default), 한국어, 日本語, 中文 — switch in-app, applies instantly
 
 ## Requirements
 

@@ -174,9 +174,6 @@ fun AppScreen() {
             // startup and a stale read would stopSelf() ahead of startForeground (crash).
             repo.setEnabled(on)
             if (on) {
-                if (Build.VERSION.SDK_INT >= 33 && !notificationsGranted) {
-                    notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
                 ContextCompat.startForegroundService(context, Intent(context, HingeService::class.java))
             } else {
                 context.stopService(Intent(context, HingeService::class.java))
