@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -47,6 +49,9 @@ class HingeService : Service(), SensorEventListener {
     @Volatile
     private var isForeground = false
 
+    @Volatile
+    private var localeTag = ""
+
     private var screenWasOff = false
     private var hingeSensor: Sensor? = null
 
@@ -56,12 +61,27 @@ class HingeService : Service(), SensorEventListener {
         powerManager = getSystemService(PowerManager::class.java)
         notifyManager = getSystemService(NotificationManager::class.java)
         hingeSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE)
-        createChannels()
+        localeTag = AppLocales.savedTagBlocking(this)
+        createChannels(lctx())
         scope.launch {
             SettingsRepository(applicationContext).settings.collect { updated ->
                 settings = updated
+                if (updated.language != localeTag) {
+                    localeTag = updated.language
+                    createChannels(lctx())
+                }
                 if (isForeground) notifyManager.notify(NOTIFICATION_ID, buildNotification(updated))
             }
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Android 13+ per-app locale changes arrive here — refresh channel names
+        // and the ongoing notification in the new language.
+        if (isForeground) {
+            createChannels(lctx())
+            notifyManager.notify(NOTIFICATION_ID, buildNotification(settings))
         }
     }
 
@@ -132,11 +152,12 @@ class HingeService : Service(), SensorEventListener {
     }
 
     private fun launchConfigured(s: Settings) {
+        val lc = lctx()
         if (!AndroidSettings.canDrawOverlays(this)) {
             // Background activity launches need the overlay permission; ask for it instead of failing silently.
             notifyProblem(
-                title = "Permission needed",
-                text = "Allow \u201cDisplay over other apps\u201d so TT can launch ${ActionLauncher.describe(s)}.",
+                title = lc.getString(R.string.alert_permission_title),
+                text = lc.getString(R.string.alert_permission_text, ActionLauncher.describe(s)),
                 intent = overlaySettingsIntent(),
             )
             return
@@ -144,8 +165,8 @@ class HingeService : Service(), SensorEventListener {
         val intent = ActionLauncher.buildIntent(this, s)
         if (intent == null) {
             notifyProblem(
-                title = "TT could not launch the action",
-                text = "The configured app or link could not be resolved. Open TT to fix it.",
+                title = lc.getString(R.string.alert_fail_title),
+                text = lc.getString(R.string.alert_fail_text),
                 intent = MainActivity.intent(this),
             )
             return
@@ -154,8 +175,8 @@ class HingeService : Service(), SensorEventListener {
             startActivity(intent)
         } catch (e: Exception) {
             notifyProblem(
-                title = "TT could not launch the action",
-                text = e.message ?: "Unknown error",
+                title = lc.getString(R.string.alert_fail_title),
+                text = lc.getString(R.string.alert_fail_reason, e.message ?: ""),
                 intent = MainActivity.intent(this),
             )
         }
@@ -167,33 +188,48 @@ class HingeService : Service(), SensorEventListener {
             Uri.parse("package:$packageName"),
         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-    private fun createChannels() {
+    /** The service context localized to the app's chosen language (Android 12 and below). */
+    private fun lctx(): Context {
+        if (Build.VERSION.SDK_INT >= 33 || localeTag.isBlank()) return this
+        return AppLocales.localized(this, localeTag)
+    }
+
+    private fun createChannels(context: Context) {
         notifyManager.createNotificationChannel(
-            NotificationChannel(CHANNEL_MONITORING, "Gesture listener", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Persistent notification while TT watches the hinge"
+            NotificationChannel(
+                CHANNEL_MONITORING,
+                context.getString(R.string.ch_listener),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = context.getString(R.string.ch_listener_desc)
                 setShowBadge(false)
             }
         )
         notifyManager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ALERTS, "Alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Permission requests and launch failures"
+            NotificationChannel(
+                CHANNEL_ALERTS,
+                context.getString(R.string.ch_alerts),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = context.getString(R.string.ch_alerts_desc)
             }
         )
     }
 
     private fun buildNotification(s: Settings): Notification {
+        val lc = lctx()
         val contentIntent = PendingIntent.getActivity(
             this, 0, MainActivity.intent(this),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return NotificationCompat.Builder(this, CHANNEL_MONITORING)
+        return NotificationCompat.Builder(lc, CHANNEL_MONITORING)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("TT is listening")
+            .setContentTitle(lc.getString(R.string.notif_title))
             .setContentText(
                 if (s.isActionReady) {
-                    "Bend past 90\u00b0 and reopen \u2192 ${ActionLauncher.describe(s)}"
+                    lc.getString(R.string.notif_listening, ActionLauncher.describe(s))
                 } else {
-                    "Pick an app or link in TT to arm the gesture"
+                    lc.getString(R.string.notif_unarmed)
                 }
             )
             .setOngoing(true)

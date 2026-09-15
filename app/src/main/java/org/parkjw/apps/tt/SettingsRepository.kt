@@ -20,6 +20,7 @@ data class Settings(
     val shortcutPackage: String = "",
     val shortcutLabel: String = "",
     val shortcutId: String = "",
+    val language: String = "",
 ) {
     val isActionReady: Boolean
         get() = when (actionType) {
@@ -40,6 +41,7 @@ class SettingsRepository(context: Context) {
         val SHORTCUT_PACKAGE = stringPreferencesKey("shortcut_package")
         val SHORTCUT_LABEL = stringPreferencesKey("shortcut_label")
         val SHORTCUT_ID = stringPreferencesKey("shortcut_id")
+        val LANGUAGE = stringPreferencesKey("language")
     }
 
     val settings: Flow<Settings> = dataStore.data.map { p ->
@@ -53,6 +55,7 @@ class SettingsRepository(context: Context) {
             shortcutPackage = p[Keys.SHORTCUT_PACKAGE] ?: "",
             shortcutLabel = p[Keys.SHORTCUT_LABEL] ?: "",
             shortcutId = p[Keys.SHORTCUT_ID] ?: "",
+            language = p[Keys.LANGUAGE] ?: "",
         )
     }
 
@@ -71,6 +74,8 @@ class SettingsRepository(context: Context) {
         it[Keys.SHORTCUT_ID] = shortcutId
         it[Keys.APP_LABEL] = appLabel
     }
+
+    suspend fun setLanguage(tag: String) = edit { it[Keys.LANGUAGE] = tag }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         dataStore.edit(block)

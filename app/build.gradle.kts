@@ -21,8 +21,8 @@ android {
         // TYPE_HINGLE_ANGLE requires API 30 (Android 11).
         minSdk = 30
         targetSdk = 37
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
     }
 
     signingConfigs {

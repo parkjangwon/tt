@@ -1,6 +1,8 @@
 package org.parkjw.apps.tt
 
 import android.Manifest
+import android.app.Activity
+import android.app.LocaleManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -28,7 +30,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,7 +46,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Search
@@ -78,6 +78,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -93,6 +94,10 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocales.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -201,6 +206,20 @@ fun AppScreen() {
         ActionLauncher.buildIntent(context, settings)?.let { runCatching { context.startActivity(it) } }
     }
 
+    fun setLanguage(tag: String) {
+        scope.launch { repo.setLanguage(tag) }
+        AppLocales.applySystem(context, tag)
+        if (Build.VERSION.SDK_INT < 33) (context as? Activity)?.recreate()
+    }
+
+    // Source of truth for the selected language: the system on 13+, DataStore below.
+    val selectedTag = if (Build.VERSION.SDK_INT >= 33) {
+        context.getSystemService(LocaleManager::class.java)?.applicationLocales
+            ?.toLanguageTags().orEmpty()
+    } else {
+        settings.language
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -211,16 +230,16 @@ fun AppScreen() {
         // Viewing area — title and summary, no interactive elements.
         Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
             Text("TT", fontSize = 40.sp, fontWeight = FontWeight.Light, color = ttColors().onBackground)
-            Text("Fold-gesture launcher", fontSize = 16.sp, color = ttColors().subText)
+            Text(stringResource(R.string.subtitle), fontSize = 16.sp, color = ttColors().subText)
         }
 
         // Master switch
         TtRow(
-            title = "Enabled",
+            title = stringResource(R.string.enabled),
             description = when {
-                !settings.enabled -> "Off"
-                !settings.isActionReady -> "On — pick an app or shortcut to arm"
-                else -> "On — ${ActionLauncher.describe(settings)}"
+                !settings.enabled -> stringResource(R.string.enabled_off)
+                !settings.isActionReady -> stringResource(R.string.enabled_on_unarmed)
+                else -> stringResource(R.string.enabled_on, ActionLauncher.describe(settings))
             },
             trailing = { TtSwitch(checked = settings.enabled, onCheckedChange = { setEnabled(it) }) }
         )
@@ -228,8 +247,8 @@ fun AppScreen() {
 
         if (settings.enabled && !overlayGranted) {
             TtRow(
-                title = "Permission required",
-                description = "Grant \u201cDisplay over other apps\u201d so TT can launch from the background.",
+                title = stringResource(R.string.permission_required_title),
+                description = stringResource(R.string.permission_overlay_desc),
                 leading = {
                     Icon(
                         Icons.Rounded.Warning,
@@ -237,26 +256,28 @@ fun AppScreen() {
                         tint = MaterialTheme.colorScheme.error
                     )
                 },
-                trailing = { TtTextButton("Grant", onClick = { grantOverlay() }) },
+                trailing = {
+                    TtTextButton(stringResource(R.string.action_grant), onClick = { grantOverlay() })
+                },
             )
             TtDivider()
         }
 
-        SectionHeader("Setup")
+        SectionHeader(stringResource(R.string.setup))
         SetupRow(
             ok = overlayGranted,
             pendingIcon = Icons.Rounded.Warning,
-            title = "Display over other apps",
-            description = "Required so TT can open your app from the background",
-            actionLabel = if (overlayGranted) null else "Grant",
+            title = stringResource(R.string.overlay_title),
+            description = stringResource(R.string.overlay_desc),
+            actionLabel = if (overlayGranted) null else stringResource(R.string.action_grant),
             onAction = { grantOverlay() },
         )
         SetupRow(
             ok = notificationsGranted,
             pendingIcon = Icons.Rounded.Notifications,
-            title = "Notifications",
-            description = "Shows a quiet notification while TT is listening",
-            actionLabel = if (notificationsGranted) null else "Allow",
+            title = stringResource(R.string.notifications_title),
+            description = stringResource(R.string.notifications_desc),
+            actionLabel = if (notificationsGranted) null else stringResource(R.string.action_allow),
             onAction = {
                 notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             },
@@ -264,35 +285,35 @@ fun AppScreen() {
         SetupRow(
             ok = batteryExempt,
             pendingIcon = Icons.Rounded.Info,
-            title = "Battery optimization",
-            description = "Exempt TT so Android doesn't kill the listener",
-            actionLabel = if (batteryExempt) null else "Exempt",
+            title = stringResource(R.string.battery_title),
+            description = stringResource(R.string.battery_desc),
+            actionLabel = if (batteryExempt) null else stringResource(R.string.action_exempt),
             onAction = { requestBatteryExemption() },
         )
         SetupRow(
             ok = hingeSensor != null,
             pendingIcon = Icons.Rounded.Info,
-            title = "Hinge angle sensor",
-            description = if (hingeSensor != null) "Available — this device is supported"
-            else "Not found on this device",
+            title = stringResource(R.string.hinge_sensor_title),
+            description = if (hingeSensor != null) stringResource(R.string.hinge_sensor_ok)
+            else stringResource(R.string.hinge_sensor_none),
             actionLabel = null,
             onAction = null,
         )
         TtDivider()
 
-        SectionHeader("When triggered")
+        SectionHeader(stringResource(R.string.when_triggered))
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ToggleOption(
-                text = "App",
+                text = stringResource(R.string.type_app),
                 selected = settings.actionType == ActionType.APP,
                 modifier = Modifier.weight(1f),
                 onClick = { scope.launch { repo.setActionType(ActionType.APP) } }
             )
             ToggleOption(
-                text = "Shortcut",
+                text = stringResource(R.string.type_shortcut),
                 selected = settings.actionType == ActionType.SHORTCUT,
                 modifier = Modifier.weight(1f),
                 onClick = { scope.launch { repo.setActionType(ActionType.SHORTCUT) } }
@@ -300,14 +321,14 @@ fun AppScreen() {
         }
         when (settings.actionType) {
             ActionType.APP -> TtRow(
-                title = if (settings.packageName.isBlank()) "Choose an app…"
+                title = if (settings.packageName.isBlank()) stringResource(R.string.choose_app)
                 else settings.appLabel.ifBlank { settings.packageName },
                 description = settings.packageName.takeIf { it.isNotBlank() },
                 onClick = { pickerOpen = true },
             )
 
             ActionType.SHORTCUT -> TtRow(
-                title = if (settings.shortcutId.isBlank()) "Choose a shortcut…"
+                title = if (settings.shortcutId.isBlank()) stringResource(R.string.choose_shortcut)
                 else settings.shortcutLabel.ifBlank { settings.shortcutId },
                 description = settings.shortcutPackage.takeIf { it.isNotBlank() },
                 onClick = { pickerOpen = true },
@@ -315,11 +336,11 @@ fun AppScreen() {
         }
         TtDivider()
 
-        SectionHeader("Hinge")
+        SectionHeader(stringResource(R.string.hinge))
         if (hingeSensor == null) {
             TtRow(
-                title = "Not available",
-                description = "No hinge angle sensor found. TT needs a foldable such as Galaxy Z Fold or Pixel Fold.",
+                title = stringResource(R.string.hinge_na),
+                description = stringResource(R.string.hinge_none_desc),
             )
         } else {
             Row(
@@ -335,25 +356,32 @@ fun AppScreen() {
                 )
                 hingeAngle?.let { angle ->
                     val phase = when {
-                        angle >= GestureConfig.STANDARD.openAngle -> "Open"
-                        angle <= GestureConfig.STANDARD.foldAngle -> "Bent"
-                        else -> "Partial"
+                        angle >= GestureConfig.STANDARD.openAngle -> stringResource(R.string.phase_open)
+                        angle <= GestureConfig.STANDARD.foldAngle -> stringResource(R.string.phase_bent)
+                        else -> stringResource(R.string.phase_partial)
                     }
                     Text(phase, fontSize = 17.sp, color = ttColors().accent)
                 }
             }
             Text(
-                "Gesture: open (180\u00b0) \u2192 bend past 90\u00b0 \u2192 reopen within 2s.",
+                stringResource(R.string.gesture_hint),
                 fontSize = 13.sp,
                 color = ttColors().subText,
                 modifier = Modifier.padding(horizontal = 24.dp)
             )
         }
 
+        SectionHeader(stringResource(R.string.language))
+        LanguageRow(stringResource(R.string.lang_system), selectedTag.isBlank()) { setLanguage("") }
+        LanguageRow("English", selectedTag == "en") { setLanguage("en") }
+        LanguageRow("한국어", selectedTag == "ko") { setLanguage("ko") }
+        LanguageRow("日本語", selectedTag == "ja") { setLanguage("ja") }
+        LanguageRow("中文", selectedTag == "zh") { setLanguage("zh") }
+
         // Interaction area — the primary action lives at the bottom.
         Box(Modifier.padding(horizontal = 24.dp, vertical = 24.dp)) {
             TtButton(
-                text = "Test now",
+                text = stringResource(R.string.test_now),
                 enabled = settings.isActionReady,
                 onClick = { testAction() }
             )
@@ -441,6 +469,23 @@ private fun TtRow(
             trailing()
         }
     }
+}
+
+@Composable
+private fun LanguageRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    TtRow(
+        title = label,
+        onClick = onClick,
+        trailing = {
+            if (selected) {
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = ttColors().activated
+                )
+            }
+        }
+    )
 }
 
 @Composable
@@ -567,7 +612,7 @@ private fun AppPickerDialog(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Choose an app", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.picker_choose_app), fontSize = 20.sp, fontWeight = FontWeight.Medium)
             TtSearchField(
                 value = query,
                 onValueChange = { query = it },
@@ -586,7 +631,7 @@ private fun AppPickerDialog(
                     }
                     if (filtered.isEmpty()) {
                         Text(
-                            "No apps found",
+                            stringResource(R.string.no_apps),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(vertical = 24.dp),
                         )
@@ -660,9 +705,14 @@ private fun ShortcutPickerDialog(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Shortcuts", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.shortcuts_title), fontSize = 20.sp, fontWeight = FontWeight.Medium)
             Text(
                 app.label,
+                fontSize = 13.sp,
+                color = ttColors().subText
+            )
+            Text(
+                stringResource(R.string.shortcuts_note),
                 fontSize = 13.sp,
                 color = ttColors().subText
             )
@@ -674,7 +724,7 @@ private fun ShortcutPickerDialog(
 
                 else -> if (list.isEmpty()) {
                     Text(
-                        "This app publishes no shortcuts.",
+                        stringResource(R.string.no_shortcuts),
                         fontSize = 18.sp,
                         modifier = Modifier.padding(vertical = 24.dp),
                     )
@@ -725,13 +775,13 @@ private fun TtSearchField(
         singleLine = true,
         shape = RoundedCornerShape(12.dp),
         leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-        placeholder = { Text("Search", fontSize = 17.sp) },
+        placeholder = { Text(stringResource(R.string.search), fontSize = 17.sp) },
         colors = TextFieldDefaults.colors(
             focusedContainerColor = ttColors().grayButton,
             unfocusedContainerColor = ttColors().grayButton,
-            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            disabledIndicatorColor = Color.Transparent,
         ),
         modifier = modifier.fillMaxWidth()
     )
