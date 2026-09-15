@@ -24,7 +24,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlin.math.roundToInt
 
 /**
@@ -59,7 +61,6 @@ class HingeService : Service(), SensorEventListener {
             SettingsRepository(applicationContext).settings.collect { updated ->
                 settings = updated
                 if (isForeground) notifyManager.notify(NOTIFICATION_ID, buildNotification(updated))
-                if (!updated.enabled) stopSelf()
             }
         }
     }
@@ -72,6 +73,16 @@ class HingeService : Service(), SensorEventListener {
         }
         ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(settings), type)
         isForeground = true
+
+        // Re-read after startForeground: the UI toggle writes before starting us, and a
+        // stale first emission must never stopSelf() ahead of startForeground (FGS timeout crash).
+        val current = runBlocking { SettingsRepository(applicationContext).settings.first() }
+        settings = current
+        if (!current.enabled) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         // ADB-only test hook so the launch path can be exercised without the gesture.
         if (intent?.getStringExtra(EXTRA_DEBUG) == "trigger") {
             Log.i(TAG, "debug trigger")

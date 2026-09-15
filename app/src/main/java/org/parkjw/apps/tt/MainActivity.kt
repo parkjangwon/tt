@@ -164,14 +164,18 @@ fun AppScreen() {
     }
 
     fun setEnabled(on: Boolean) {
-        scope.launch { repo.setEnabled(on) }
-        if (on) {
-            if (Build.VERSION.SDK_INT >= 33 && !notificationsGranted) {
-                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        scope.launch {
+            // Persist first, then start the service — the service reads the setting on
+            // startup and a stale read would stopSelf() ahead of startForeground (crash).
+            repo.setEnabled(on)
+            if (on) {
+                if (Build.VERSION.SDK_INT >= 33 && !notificationsGranted) {
+                    notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                ContextCompat.startForegroundService(context, Intent(context, HingeService::class.java))
+            } else {
+                context.stopService(Intent(context, HingeService::class.java))
             }
-            ContextCompat.startForegroundService(context, Intent(context, HingeService::class.java))
-        } else {
-            context.stopService(Intent(context, HingeService::class.java))
         }
     }
 
@@ -201,10 +205,11 @@ fun AppScreen() {
         modifier = Modifier
             .fillMaxSize()
             .background(ttColors().background)
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
     ) {
         // Viewing area — title and summary, no interactive elements.
-        Column(Modifier.statusBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp)) {
+        Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
             Text("TT", fontSize = 40.sp, fontWeight = FontWeight.Light, color = ttColors().onBackground)
             Text("Fold-gesture launcher", fontSize = 16.sp, color = ttColors().subText)
         }
